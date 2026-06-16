@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ナンプレ</title>
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --given: #1a1a1a;
+    --entry: #2563eb;
+    --memo: #94a3b8;
+    --grid-line: #1a1a1a;
+    --thin-line: #cbd5e1;
+    --bg: #faf8f3;
+    --cell: #ffffff;
+    --sel: #fde68a;
+    --peer: #fef9e7;
+    --same: #c7e0ff;
+    --panel: #f1ede4;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 100vh;
+    padding: 16px;
+    gap: 16px;
+  }
+  h1 { font-size: 1.3rem; font-weight: 700; letter-spacing: 0.04em; margin: 4px 0; }
+
+  /* mode toggle */
+  .topbar {
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center;
+  }
+  .topbar button {
+    font: inherit; font-size: 0.85rem; padding: 8px 14px; border-radius: 8px;
+    border: 1px solid var(--thin-line); background: var(--cell); color: var(--ink);
+    cursor: pointer; transition: all 0.12s;
+  }
+  .topbar button.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .topbar button:active { transform: scale(0.96); }
+
+  /* grid */
+  .board {
+    display: grid;
+    grid-template-columns: repeat(9, minmax(0, 1fr));
+    grid-template-rows: repeat(9, minmax(0, 1fr));
+    gap: 1px;
+    width: min(92vw, 480px);
+    aspect-ratio: 1;
+    background: var(--thin-line);
+    border: 3px solid var(--grid-line);
+    border-radius: 6px;
+    overflow: hidden;
+    touch-action: manipulation;
+  }
+  .cell {
+    background: var(--cell);
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: clamp(1.1rem, 5vw, 1.8rem);
+    line-height: 1;
+    overflow: hidden;
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+  }
+  /* thick 3x3 separators (box-shadow so they don't affect cell sizing) */
+  .cell[data-c="2"], .cell[data-c="5"] { box-shadow: inset -1.5px 0 0 0 var(--grid-line); }
+  .cell[data-r="2"], .cell[data-r="5"] { box-shadow: inset 0 -1.5px 0 0 var(--grid-line); }
+  .cell[data-c="2"][data-r="2"], .cell[data-c="2"][data-r="5"],
+  .cell[data-c="5"][data-r="2"], .cell[data-c="5"][data-r="5"] {
+    box-shadow: inset -1.5px 0 0 0 var(--grid-line), inset 0 -1.5px 0 0 var(--grid-line);
+  }
+
+  .cell.given { font-weight: 700; color: var(--given); }
+  .cell.entry { font-weight: 400; color: var(--entry); }
+  .cell.selected { background: var(--sel) !important; }
+  .cell.peer { background: var(--peer); }
+  .cell.same { background: var(--same); }
+
+  /* memo layout: 3 small numbers top corner */
+  .memo {
+    position: absolute;
+    top: 2px; left: 4px; right: 4px;
+    display: flex; gap: 4px;
+    font-size: clamp(0.5rem, 2.4vw, 0.72rem);
+    color: var(--memo);
+    font-weight: 500;
+    line-height: 1;
+    pointer-events: none;
+  }
+
+  /* setup mode banner */
+  .banner {
+    font-size: 0.82rem; color: #92703a; background: #fdf6e3;
+    border: 1px solid #e8d9a8; border-radius: 8px; padding: 8px 14px;
+    text-align: center; max-width: 480px;
+  }
+
+  /* number pad */
+  .pad {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    width: min(92vw, 480px);
+  }
+  .pad button {
+    font: inherit; font-size: 1.3rem; font-weight: 600;
+    padding: 14px 0; border-radius: 10px;
+    border: 1px solid var(--thin-line); background: var(--cell); color: var(--ink);
+    cursor: pointer; transition: transform 0.08s;
+  }
+  .pad button:active { transform: scale(0.93); }
+  .pad button.erase { font-size: 1rem; color: #b91c1c; }
+
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .actions button {
+    font: inherit; font-size: 0.85rem; padding: 9px 16px; border-radius: 8px;
+    border: 1px solid var(--thin-line); background: var(--cell); color: var(--ink); cursor: pointer;
+  }
+  .actions button:active { transform: scale(0.96); }
+</style>
+</head>
+<body>
+  <h1>ナンプレ</h1>
+
+  <div class="topbar">
+    <button id="modeSetup" class="active">問題設定モード</button>
+    <button id="modePlay">プレイモード</button>
+    <span style="width:12px"></span>
+    <button id="entryMode" class="active">数字入力</button>
+    <button id="memoMode">候補メモ</button>
+  </div>
+
+  <div class="banner" id="banner">問題設定モード：固定にしたいマスを選んで数字を入力してください。</div>
+
+  <div class="board" id="board"></div>
+
+  <div class="pad" id="pad"></div>
+
+  <div class="actions">
+    <button id="clearMemos">候補を全消去</button>
+    <button id="resetEntries">入力をリセット</button>
+    <button id="clearAll">全部消去</button>
+  </div>
+
+<script>
+const board = document.getElementById('board');
+const SIZE = 9;
+
+// state[r][c] = { value: 0-9, given: bool, memos: [..] }
+let state = [];
+for (let r = 0; r < SIZE; r++) {
+  state.push([]);
+  for (let c = 0; c < SIZE; c++) state[r].push({ value: 0, given: false, memos: [] });
+}
+
+let selected = null;        // {r, c}
+let setupMode = true;       // true = 問題設定, false = プレイ
+let memoMode = false;       // false = 数字入力, true = 候補メモ
+
+// build cells
+const cells = [];
+for (let r = 0; r < SIZE; r++) {
+  cells.push([]);
+  for (let c = 0; c < SIZE; c++) {
+    const div = document.createElement('div');
+    div.className = 'cell';
+    div.dataset.r = r;
+    div.dataset.c = c;
+    div.addEventListener('click', () => selectCell(r, c));
+    board.appendChild(div);
+    cells[r].push(div);
+  }
+}
+
+function selectCell(r, c) {
+  selected = { r, c };
+  render();
+}
+
+function setNumber(n) {
+  if (!selected) return;
+  const { r, c } = selected;
+  const cell = state[r][c];
+
+  if (setupMode) {
+    // 設定モード: 固定数字を置く
+    cell.value = n;
+    cell.given = n !== 0;
+    cell.memos = [];
+  } else {
+    // プレイモード: 固定マスは編集不可
+    if (cell.given) return;
+    if (memoMode) {
+      if (n === 0) { cell.memos = []; return render(); }
+      const idx = cell.memos.indexOf(n);
+      if (idx >= 0) {
+        cell.memos.splice(idx, 1);           // トグルで消す
+      } else {
+        if (cell.memos.length >= 3) return;  // 最大3つ
+        cell.memos.push(n);
+        cell.memos.sort((a, b) => a - b);
+      }
+    } else {
+      cell.value = n;                        // 0 なら消去
+      if (n !== 0) cell.memos = [];
+    }
+  }
+  render();
+}
+
+function render() {
+  for (let r = 0; r < SIZE; r++) {
+    for (let c = 0; c < SIZE; c++) {
+      const cell = state[r][c];
+      const el = cells[r][c];
+      el.className = 'cell';
+      el.innerHTML = '';
+
+      if (cell.value !== 0) {
+        el.textContent = cell.value;
+        el.classList.add(cell.given ? 'given' : 'entry');
+      } else if (cell.memos.length) {
+        const m = document.createElement('div');
+        m.className = 'memo';
+        cell.memos.forEach(v => {
+          const s = document.createElement('span');
+          s.textContent = v;
+          m.appendChild(s);
+        });
+        el.appendChild(m);
+      }
+
+      // highlight peers (same row/col only) & same value
+      if (selected) {
+        if (r === selected.r || c === selected.c) el.classList.add('peer');
+        const selVal = state[selected.r][selected.c].value;
+        if (selVal !== 0 && cell.value === selVal) el.classList.add('same');
+      }
+    }
+  }
+  if (selected) cells[selected.r][selected.c].classList.add('selected');
+}
+
+// number pad
+const pad = document.getElementById('pad');
+for (let n = 1; n <= 9; n++) {
+  const b = document.createElement('button');
+  b.textContent = n;
+  b.addEventListener('click', () => setNumber(n));
+  pad.appendChild(b);
+}
+const erase = document.createElement('button');
+erase.textContent = '消す';
+erase.className = 'erase';
+erase.addEventListener('click', () => setNumber(0));
+pad.appendChild(erase);
+
+// mode toggles
+const banner = document.getElementById('banner');
+const mSetup = document.getElementById('modeSetup');
+const mPlay = document.getElementById('modePlay');
+const eMode = document.getElementById('entryMode');
+const mMode = document.getElementById('memoMode');
+
+function updateBanner() {
+  banner.textContent = setupMode
+    ? '問題設定モード：固定にしたいマスを選んで数字を入力してください。'
+    : 'プレイモード：空欄を選んで数字、または候補メモを入力できます。';
+}
+
+mSetup.addEventListener('click', () => {
+  setupMode = true;
+  mSetup.classList.add('active'); mPlay.classList.remove('active');
+  updateBanner();
+});
+mPlay.addEventListener('click', () => {
+  setupMode = false;
+  mPlay.classList.add('active'); mSetup.classList.remove('active');
+  updateBanner();
+});
+eMode.addEventListener('click', () => {
+  memoMode = false;
+  eMode.classList.add('active'); mMode.classList.remove('active');
+});
+mMode.addEventListener('click', () => {
+  memoMode = true;
+  mMode.classList.add('active'); eMode.classList.remove('active');
+});
+
+// actions
+document.getElementById('clearMemos').addEventListener('click', () => {
+  state.forEach(row => row.forEach(c => c.memos = []));
+  render();
+});
+document.getElementById('resetEntries').addEventListener('click', () => {
+  state.forEach(row => row.forEach(c => { if (!c.given) { c.value = 0; c.memos = []; } }));
+  render();
+});
+document.getElementById('clearAll').addEventListener('click', () => {
+  state.forEach(row => row.forEach(c => { c.value = 0; c.given = false; c.memos = []; }));
+  selected = null;
+  render();
+});
+
+// keyboard support
+document.addEventListener('keydown', (e) => {
+  if (!selected) return;
+  if (e.key >= '1' && e.key <= '9') setNumber(parseInt(e.key));
+  else if (e.key === '0' || e.key === 'Backspace' || e.key === 'Delete') setNumber(0);
+  else if (e.key === 'ArrowUp') { selected.r = Math.max(0, selected.r-1); render(); }
+  else if (e.key === 'ArrowDown') { selected.r = Math.min(8, selected.r+1); render(); }
+  else if (e.key === 'ArrowLeft') { selected.c = Math.max(0, selected.c-1); render(); }
+  else if (e.key === 'ArrowRight') { selected.c = Math.min(8, selected.c+1); render(); }
+});
+
+render();
+</script>
+</body>
+</html>
